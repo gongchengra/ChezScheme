@@ -1,5 +1,5 @@
 ;;; i3nt.def
-;;; Copyright 1984-2016 Cisco Systems, Inc.
+;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
 ;;; Licensed under the Apache License, Version 2.0 (the "License");
 ;;; you may not use this file except in compliance with the License.
@@ -38,8 +38,8 @@
 (define-constant typedef-u16 "unsigned short")
 (define-constant typedef-i32 "int")
 (define-constant typedef-u32 "unsigned int")
-(define-constant typedef-i64 "__int64")
-(define-constant typedef-u64 "unsigned __int64")
+(define-constant typedef-i64 "long long")
+(define-constant typedef-u64 "unsigned long long")
 (define-constant typedef-string-char "unsigned int")
 (define-constant thread-handle-uptrs 1)
 (define-constant native-endianness 'little)

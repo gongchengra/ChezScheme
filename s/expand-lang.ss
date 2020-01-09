@@ -1,5 +1,5 @@
 ;;; expand-lang.ss
-;;; Copyright 1984-2016 Cisco Systems, Inc.
+;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
 ;;; Licensed under the Apache License, Version 2.0 (the "License");
 ;;; you may not use this file except in compliance with the License.
@@ -38,13 +38,11 @@
 (define-record-type library/ct-info
   (parent library-info)
   (fields
-    ; NB: include-req* should go away with new recompile support that uses recompile-info
-    (immutable include-req*)
     (immutable import-req*)
     (immutable visit-visit-req*)
     (immutable visit-req*)
     (immutable clo*))
-  (nongenerative #{library/ct-info fgf0koeh2zn6ajlujfyoyf-3})
+  (nongenerative #{library/ct-info fgf0koeh2zn6ajlujfyoyf-4})
   (sealed #t))
 
 (define-record-type library/rt-info
@@ -58,12 +56,6 @@
   (fields (immutable uid) (immutable invoke-req*))
   (nongenerative #{program-info fgc8ptwnu9i5gfqz3s85mr-0})
   (sealed #t))
-
-(define (revisit-stuff? x) (and (pair? x) (eqv? (car x) (constant revisit-tag))))
-(define (revisit-stuff-inner x) (cdr x))
-
-(define (visit-stuff? x) (and (pair? x) (eqv? (car x) (constant visit-tag))))
-(define (visit-stuff-inner x) (cdr x))
 
 (module (Lexpand Lexpand?)
   (define library-path?
@@ -80,10 +72,10 @@
   (define maybe-label? (lambda (x) (or (not x) (gensym? x))))
 
   (define-language Lexpand
-    (nongenerative-id #{Lexpand fgy7v2wrvj0so4ro8kvhqo-1})
+    (nongenerative-id #{Lexpand fgy7v2wrvj0so4ro8kvhqo-3})
     (terminals
       (maybe-label (dl))
-      (gensym (uid))
+      (gensym (uid export-id))
       (library-path (path))
       (library-version (version))
       (maybe-optimization-loc (db))
@@ -96,21 +88,21 @@
       (library/rt-info (linfo/rt))
       (program-info (pinfo)))
     (Outer (outer)
-      rcinfo
+      (recompile-info rcinfo)
       (group outer1 outer2)
       (visit-only inner)
       (revisit-only inner)
       inner)
     (Inner (inner)
-      linfo/ct
+      (library/ct-info linfo/ct)
       ctlib
-      linfo/rt
+      (library/rt-info linfo/rt)
       rtlib
-      pinfo
+      (program-info pinfo)
       prog
       lsrc)
     (ctLibrary (ctlib)
-      (library/ct uid import-code visit-code))
+      (library/ct uid (export-id* ...) import-code visit-code))
     (rtLibrary (rtlib)
       (library/rt uid
         (dl* ...)

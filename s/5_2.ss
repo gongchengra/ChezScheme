@@ -1,6 +1,6 @@
 "5_2.ss"
 ;;; 5_2.ss
-;;; Copyright 1984-2016 Cisco Systems, Inc.
+;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
 ;;; Licensed under the Apache License, Version 2.0 (the "License");
 ;;; you may not use this file except in compliance with the License.
@@ -266,20 +266,26 @@
          (if (null? xr) x1 (append x1 (f (car xr) (cdr xr)))))])))
 
 (define-who append!
-  (rec append!
+  (let ()
+    (define (do-append! x1 x2)
+      (if (null? x1)
+          x2
+          (let f ([ls x1])
+            (if (null? (cdr ls))
+                (begin (set-cdr! ls x2) x1)
+                (f (cdr ls))))))
     (case-lambda
       [() '()]
       [(x1 x2)
        ($list-length x1 who)
-       (if (null? x1)
-           x2
-           (let f ([ls x1])
-             (if (null? (cdr ls))
-                 (begin (set-cdr! ls x2) x1)
-                 (f (cdr ls)))))]
+       (do-append! x1 x2)]
       [(x1 . xr)
        (let f ([x1 x1] [xr xr])
-         (if (null? xr) x1 (append! x1 (f (car xr) (cdr xr)))))])))
+         (if (null? xr)
+             x1
+             (begin
+               ($list-length x1 who) ; make sure all checks occur before first set-cdr!
+               (do-append! x1 (f (car xr) (cdr xr))))))])))
 
 (define-who reverse
   (lambda (ls)

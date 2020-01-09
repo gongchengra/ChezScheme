@@ -1,5 +1,5 @@
 /* segment.h
- * Copyright 1984-2016 Cisco Systems, Inc.
+ * Copyright 1984-2017 Cisco Systems, Inc.
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@
  */
 
 #ifdef WIN32
-#undef FORCEINLINE
-#define FORCEINLINE static __forceinline
+# ifndef __MINGW32__
+#  undef FORCEINLINE
+#  define FORCEINLINE static __forceinline
+# endif
 #else
 #define FORCEINLINE static inline
 #endif

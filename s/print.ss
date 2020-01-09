@@ -1,6 +1,6 @@
 "print.ss"
 ;;; print.ss
-;;; Copyright 1984-2016 Cisco Systems, Inc.
+;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;;
 ;;; Licensed under the Apache License, Version 2.0 (the "License");
 ;;; you may not use this file except in compliance with the License.
@@ -592,10 +592,14 @@ floating point returns with (1 0 -1 ...).
      (if-feature pthreads
        (begin
          (define $condition? thread-condition?)
-         (define $mutex? mutex?))
+         (define $condition-name condition-name)
+         (define $mutex? mutex?)
+         (define $mutex-name mutex-name))
        (begin
          (define $condition? (lambda (x) #f))
-         (define $mutex? (lambda (x) #f))))
+         (define $condition-name (lambda (x) #f))
+         (define $mutex? (lambda (x) #f))
+         (define $mutex-name (lambda (x) #f))))
      (cond
        [($immediate? x)
         (type-case x
@@ -651,8 +655,22 @@ floating point returns with (1 0 -1 ...).
           [(bytevector?) (wrvector bytevector-length bytevector-u8-ref "vu8" x r lev len d? env p)]
           [(flonum?) (wrflonum #f x r d? p)]
           ; catch before record? case
-          [($condition?) (display-string "#<condition>" p)]
-          [($mutex?) (display-string "#<mutex>" p)]
+          [($condition?)
+           (cond
+            (($condition-name x) =>
+             (lambda (name)
+               (display-string "#<condition " p)
+               (wrsymbol (symbol->string name) p)
+               (write-char #\> p)))
+            (else (display-string "#<condition>" p)))]
+          [($mutex?)
+           (cond
+            (($mutex-name x) =>
+             (lambda (name)
+               (display-string "#<mutex " p)
+               (wrsymbol (symbol->string name) p)
+               (write-char #\> p)))
+            (else (display-string "#<mutex>" p)))]
           [(base-rtd?) (display-string "#!base-rtd" p)]
           [($record?)
            (if (print-record)
@@ -709,9 +727,11 @@ floating point returns with (1 0 -1 ...).
         [(let ([info ($code-info x)])
            (and (code-info? info) (code-info-src info))) =>
          (lambda (src)
-           (fprintf p " at ~a:~s"
+           (fprintf p " at ~a:~a"
              (path-last (source-file-descriptor-name (source-sfd src)))
-             (source-bfp src)))])))
+             (if (source-2d? src)
+                 (format "~a.~a" (source-2d-line src) (source-2d-column src))
+                 (source-bfp src))))])))
 
   (define wrprocedure
     (lambda (x p)

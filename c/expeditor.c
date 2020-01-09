@@ -1,5 +1,5 @@
 /* expeditor.c
- * Copyright 1984-2016 Cisco Systems, Inc.
+ * Copyright 1984-2017 Cisco Systems, Inc.
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -527,7 +527,10 @@ static void s_ee_write_char(wchar_t c) {
 }
 
 #else /* WIN32 */
-#ifdef SOLARIS
+#include <limits.h>
+#ifdef DISABLE_CURSES
+#include "nocurses.h"
+#elif defined(SOLARIS)
 #define NCURSES_CONST
 #define CHTYPE int
 #include </usr/include/curses.h>
@@ -546,10 +549,23 @@ static void s_ee_write_char(wchar_t c) {
 #include <sys/ioctl.h>
 #include <wchar.h>
 #include <locale.h>
+#if !defined(__GLIBC__) && !defined(__OpenBSD__) && !defined(__NetBSD__)
 #include <xlocale.h>
+#endif
 
 #if defined(TIOCGWINSZ) && defined(SIGWINCH) && defined(EINTR)
 #define HANDLE_SIGWINCH
+#endif
+
+#ifdef USE_MBRTOWC_L
+static locale_t the_locale;
+static locale_t uselocale_alt(locale_t l) {
+  locale_t old = the_locale;
+  the_locale = l;
+  return old;
+}
+# define uselocale(v) uselocale_alt(v)
+# define mbrtowc(pwc, s, n, ps) mbrtowc_l(pwc, s, n, ps, the_locale)
 #endif
 
 /* locally defined functions */
@@ -675,11 +691,15 @@ static ptr s_ee_read_char(IBOOL blockp) {
 #endif /* PTHREADS */
 
     if (n == 1) {
-      old_locale = uselocale(term_locale);
-      sz = mbrtowc(&wch, buf, 1, &term_out_mbs);
-      uselocale(old_locale);
-      if (sz == 1) {
-        return Schar(wch);
+      if (buf[0] == '\0') {
+        return Schar('\0');
+      } else {
+        old_locale = uselocale(term_locale);
+        sz = mbrtowc(&wch, buf, 1, &term_out_mbs);
+        uselocale(old_locale);
+        if (sz == 1) {
+          return Schar(wch);
+        }
       }
     }
 
@@ -886,8 +906,10 @@ static void s_ee_line_feed(void) {
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <sys/select.h>
+#endif /* LIBX11 */
 
 static ptr s_ee_get_clipboard(void) {
+#ifdef LIBX11
   static enum {UNINITIALIZED, INITIALIZED, FAILED} status = UNINITIALIZED;
   static int (*pXConvertSelection)(Display *, Atom, Atom, Atom, Window, Time);
   static int (*pXPending)(Display *display);
@@ -897,9 +919,11 @@ static ptr s_ee_get_clipboard(void) {
 
   static Display *D;
   static Window R, W;
+#endif /* LIBX11 */
 
   ptr p = S_G.null_string;
 
+#ifdef LIBX11
   if (status == UNINITIALIZED) {
     char *display_name;
     void *handle;
@@ -984,6 +1008,7 @@ static ptr s_ee_get_clipboard(void) {
       }
     }
   }
+#endif /* LIBX11 */
 
 #ifdef MACOSX
 #define PBPASTEBUFSIZE 1024
@@ -1011,11 +1036,6 @@ static ptr s_ee_get_clipboard(void) {
 
   return p;
 }
-#else /* LIBX11 */
-static ptr s_ee_get_clipboard(void) {
-  return S_G.null_string;
-}
-#endif
 
 static void s_ee_write_char(wchar_t wch) {
   locale_t old; char buf[MB_LEN_MAX]; size_t n;

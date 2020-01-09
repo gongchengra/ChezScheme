@@ -1,5 +1,5 @@
 ;;; a6nb.def
-;;; Copyright 1984-2016 Cisco Systems, Inc.
+;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
 ;;; Licensed under the Apache License, Version 2.0 (the "License");
 ;;; you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@
 (define-constant size_t-bits 64)
 (define-constant ptrdiff_t-bits 64)
 (define-constant wchar-bits 32)
-(define-constant time-t-bits 32)
+(define-constant time-t-bits 64)
 (define-constant max-float-alignment 8)
 (define-constant max-integer-alignment 8)
 (define-constant asm-arg-reg-max 5)

@@ -1,6 +1,6 @@
 "fasl.ss"
 ;;; fasl.ss
-;;; Copyright 1984-2016 Cisco Systems, Inc.
+;;; Copyright 1984-2017 Cisco Systems, Inc.
 ;;; 
 ;;; Licensed under the Apache License, Version 2.0 (the "License");
 ;;; you may not use this file except in compliance with the License.
@@ -68,6 +68,9 @@
 (define bld-record
   (lambda (x t a?)
     (unless (eq? x #!base-rtd)
+      (when (record-type-descriptor? x)
+        ; fasl representation for record-type-descriptor includes uid separately and as part of the record
+        (bld (record-type-uid x) t a?))
       (really-bld-record x t a?))))
 
 (define really-bld-record
@@ -153,9 +156,12 @@
         [(pair? x) (bld-graph x t a? bld-pair)]
         [(vector? x) (bld-graph x t a? bld-vector)]
         [(or (symbol? x) (string? x)) (bld-graph x t a? bld-simple)]
+        ; this check must go before $record? check
         [(and (annotation? x) (not a?))
          (bld (annotation-stripped x) t a?)]
+        ; this check must go before $record? check
         [(eq-hashtable? x) (bld-graph x t a? bld-ht)]
+        ; this check must go before $record? check
         [(symbol-hashtable? x) (bld-graph x t a? bld-ht)]
         [($record? x) (bld-graph x t a? bld-record)]
         [(box? x) (bld-graph x t a? bld-box)]
@@ -204,26 +210,32 @@
 
 (define wrf-pair
   (lambda (x p t a?)
-    (if (weak-pair? x)
-        (begin
-          (put-u8 p (constant fasl-type-weak-pair))
-          (wrf (car x) p t a?)
-          (wrf (cdr x) p t a?))
-        (begin ; more like list*
-          (put-u8 p (constant fasl-type-pair))
-          (let ([n (let wrf-pair-loop0 ([n 1] [x (cdr x)])
-                     ; cut off at end or at shared structure
-                      (if (and (pair? x)
-                               (not (weak-pair? x))
-                               (not (eq-hashtable-ref (table-hash t) x #f)))
-                          (wrf-pair-loop0 (fx+ n 1) (cdr x))
-                          n))])
-             (put-uptr p n)
-             (let wrf-pair-loop1 ([x x] [n n])
-                (wrf (car x) p t a?)
-                (if (fx= n 1)
-                    (wrf (cdr x) p t a?)
-                    (wrf-pair-loop1 (cdr x) (fx- n 1)))))))))
+    (cond
+      [(weak-pair? x)
+       (put-u8 p (constant fasl-type-weak-pair))
+       (wrf (car x) p t a?)
+       (wrf (cdr x) p t a?)]
+      [(ephemeron-pair? x)
+       (put-u8 p (constant fasl-type-ephemeron))
+       (wrf (car x) p t a?)
+       (wrf (cdr x) p t a?)]
+      [else
+       ; more like list*
+       (put-u8 p (constant fasl-type-pair))
+       (let ([n (let wrf-pair-loop0 ([n 1] [x (cdr x)])
+                  ; cut off at end or at shared structure
+                  (if (and (pair? x)
+                           (not (weak-pair? x))
+                           (not (ephemeron-pair? x))
+                           (not (eq-hashtable-ref (table-hash t) x #f)))
+                      (wrf-pair-loop0 (fx+ n 1) (cdr x))
+                      n))])
+         (put-uptr p n)
+         (let wrf-pair-loop1 ([x x] [n n])
+           (wrf (car x) p t a?)
+           (if (fx= n 1)
+               (wrf (cdr x) p t a?)
+               (wrf-pair-loop1 (cdr x) (fx- n 1)))))])))
 
 (define wrf-symbol
   (lambda (x p t a?)
@@ -247,12 +259,16 @@
 
 (define wrf-string
    (lambda (x p t a?)
-      (put-u8 p (constant fasl-type-string))
+      (put-u8 p (if (immutable-string? x)
+                    (constant fasl-type-immutable-string)
+                    (constant fasl-type-string)))
       (wrf-string-help x p)))
 
 (define wrf-vector
    (lambda (x p t a?)
-      (put-u8 p (constant fasl-type-vector))
+      (put-u8 p (if (immutable-vector? x)
+                    (constant fasl-type-immutable-vector)
+                    (constant fasl-type-vector)))
       (let ([n (vector-length x)]) 
          (put-uptr p n)
          (let wrf-vector-loop ([i 0])
@@ -262,7 +278,9 @@
 
 (define wrf-fxvector
   (lambda (x p t a?)
-    (put-u8 p (constant fasl-type-fxvector))
+    (put-u8 p (if (immutable-fxvector? x)
+                  (constant fasl-type-immutable-fxvector)
+                  (constant fasl-type-fxvector)))
     (let ([n (fxvector-length x)])
       (put-uptr p n)
       (let wrf-fxvector-loop ([i 0])
@@ -272,7 +290,9 @@
 
 (define wrf-bytevector
   (lambda (x p t a?)
-    (put-u8 p (constant fasl-type-bytevector))
+    (put-u8 p (if (immutable-bytevector? x)
+                  (constant fasl-type-immutable-bytevector)
+                  (constant fasl-type-bytevector)))
     (let ([n (bytevector-length x)])
       (put-uptr p n)
       (let wrf-bytevector-loop ([i 0])
@@ -282,7 +302,7 @@
             (wrf-bytevector-loop (fx+ i 1))))))))
 
 ; Written as: fasl-tag rtd field ...
-(module (wrf-record really-wrf-record)
+(module (wrf-record really-wrf-record wrf-annotation)
   (define maybe-remake-rtd
     (lambda (rtd)
       (if (eq? (machine-type) ($target-machine))
@@ -409,16 +429,31 @@
       (cond
         [(record-type-descriptor? x)
          (put-u8 p (constant fasl-type-rtd))
+         (wrf (record-type-uid x) p t a?)
          (wrf-fields (maybe-remake-rtd x) p t a?)]
         [else
          (put-u8 p (constant fasl-type-record))
-         (wrf-fields x p t a?)]))))
+         (wrf-fields x p t a?)])))
+
+  (define wrf-annotation
+    (lambda (x p t a?)
+      (define maybe-remake-annotation
+        (lambda (x a?)
+          (if (fx= (annotation-flags x) a?)
+              x
+              (make-annotation (annotation-expression x) (annotation-source x) (annotation-stripped x) a?))))
+      (put-u8 p (constant fasl-type-record))
+      (wrf-fields (maybe-remake-annotation x a?) p t a?)))
+)
 
 (define wrf-eqht
   (lambda (x p t a?)
     (put-u8 p (constant fasl-type-eq-hashtable))
     (put-u8 p (if (hashtable-mutable? x) 1 0))
-    (put-u8 p (if (eq-hashtable-weak? x) 1 0))
+    (put-u8 p (cond
+               [(eq-hashtable-weak? x) (constant eq-hashtable-subtype-weak)]
+               [(eq-hashtable-ephemeron? x) (constant eq-hashtable-subtype-ephemeron)]
+               [else  (constant eq-hashtable-subtype-normal)]))
     (put-uptr p ($ht-minlen x))
     (put-uptr p ($ht-veclen x))
     (let-values ([(keyvec valvec) (hashtable-entries x)])
@@ -457,7 +492,9 @@
 
 (define wrf-box
    (lambda (x p t a?)
-      (put-u8 p (constant fasl-type-box))
+      (put-u8 p (if (immutable-box? x)
+                    (constant fasl-type-immutable-box)
+                    (constant fasl-type-box)))
       (wrf (unbox x) p t a?)))
 
 (define wrf-ratnum
@@ -524,11 +561,16 @@
          [(string? x) (wrf-graph x p t a? wrf-string)]
          [(fxvector? x) (wrf-graph x p t a? wrf-fxvector)]
          [(bytevector? x) (wrf-graph x p t a? wrf-bytevector)]
-         [(and (annotation? x) (not a?))
-          (wrf (annotation-stripped x) p t a?)]
-        ; this check must go before $record? check
+         ; this check must go before $record? check
+         [(annotation? x)
+          (if a?
+              (wrf-graph x p t a? wrf-annotation)
+              (wrf (annotation-stripped x) p t a?))]
+         ; this check must go before $record? check
          [(eq-hashtable? x) (wrf-graph x p t a? wrf-eqht)]
+         ; this check must go before $record? check
          [(symbol-hashtable? x) (wrf-graph x p t a? wrf-symht)]
+         ; this check must go before $record? check
          [(hashtable? x) ($oops 'fasl-write "invalid fasl object ~s" x)]
          [($record? x) (wrf-graph x p t a? wrf-record)]
          [(vector? x) (wrf-graph x p t a? wrf-vector)]
@@ -548,7 +590,7 @@
          [else ($oops 'fasl-write "invalid fasl object ~s" x)])))
 
 (define start
-  (lambda (p t proc)
+  (lambda (p t situation proc)
     (dump-graph)
     (let-values ([(bv* size)
                   (let-values ([(p extractor) ($open-bytevector-list-output-port)])
@@ -558,18 +600,19 @@
                         (put-uptr p n)))
                     (proc p)
                     (extractor))])
+      (put-u8 p situation)
       (put-u8 p (constant fasl-type-fasl-size))
       (put-uptr p size)
       (for-each (lambda (bv) (put-bytevector p bv)) bv*))))
 
 (module (fasl-write fasl-file)
-  ; when called from fasl-write or fasl-file, pass #t for a? to preserve annotations;
+  ; when called from fasl-write or fasl-file, always preserve annotations;
   ; otherwise use value passed in by the compiler
   (define fasl-one
     (lambda (x p)
       (let ([t (make-table)])
-         (bld x t #t)
-         (start p t (lambda (p) (wrf x p t #t))))))
+        (bld x t (constant annotation-all))
+        (start p t (constant fasl-type-visit-revisit) (lambda (p) (wrf x p t (constant annotation-all)))))))
 
   (define-who fasl-write
     (lambda (x p)
@@ -605,7 +648,7 @@
     (emit-header p (constant machine-type-any))
     (let ([t (make-table)])
       (bld-graph x t #f really-bld-record)
-      (start p t (lambda (p) (wrf-graph x p t #f really-wrf-record))))))
+      (start p t (constant fasl-type-visit-revisit) (lambda (p) (wrf-graph x p t #f really-wrf-record))))))
 
 ($fasl-target (make-target bld-graph bld wrf start make-table wrf-graph fasl-base-rtd fasl-write fasl-file))
 )
@@ -619,7 +662,7 @@
   (set! $fasl-bld-graph (lambda (x t a? handler) ((target-fasl-bld-graph (fasl-target)) x t a? handler)))
   (set! $fasl-enter (lambda (x t a?) ((target-fasl-enter (fasl-target)) x t a?)))
   (set! $fasl-out (lambda (x p t a?) ((target-fasl-out (fasl-target)) x p t a?)))
-  (set! $fasl-start (lambda (p t proc) ((target-fasl-start (fasl-target)) p t proc)))
+  (set! $fasl-start (lambda (p t situation proc) ((target-fasl-start (fasl-target)) p t situation proc)))
   (set! $fasl-table (lambda () ((target-fasl-table (fasl-target)))))
   (set! $fasl-wrf-graph (lambda (x p t a? handler) ((target-fasl-wrf-graph (fasl-target)) x p t a? handler)))
   (set! $fasl-base-rtd (lambda (x p) ((target-fasl-base-rtd (fasl-target)) x p)))
